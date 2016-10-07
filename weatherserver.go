@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ajg/form"
 	"net/http"
 	"strings"
 	"time"
@@ -13,7 +14,7 @@ func handleMETARRequest(w http.ResponseWriter, r *http.Request) {
 	path := strings.Trim(r.URL.Path, "/")
 	x := strings.Split(path, "/")
 	if len(x) < 2 {
-		http.Error(w, "Bad request.", 400)
+		http.Error(w, "Bad request.", http.StatusBadRequest)
 		return
 	}
 	metar, err := getLatestADDSMETAR(x[1])
@@ -25,6 +26,19 @@ func handleMETARRequest(w http.ResponseWriter, r *http.Request) {
 // /receiveRockBLOCK
 
 func handleRockBLOCKMsg(w http.ResponseWriter, r *http.Request) {
+
+	// Decode the form into 'RockBLOCKIncoming'.
+	var msg RockBLOCKIncoming
+
+	d := form.NewDecoder(r.Body)
+
+	if err := d.Decode(&u); err != nil {
+		http.Error(w, "Form could not be decoded", http.StatusBadRequest)
+		return
+	}
+
+	// Process the message.
+	msg.Process()
 
 }
 
