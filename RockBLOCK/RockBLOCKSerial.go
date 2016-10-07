@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tarm/serial"
+	"strings"
 	"time"
 )
 
 var initTextMessage = []byte("AT+SBDWT=")
 var initBinaryMessage = []byte("AT+SBDWB=")
+var initSBDSessionExtended = []byte("AT+SBDIX")
 
 type RockBLOCKSerialConnection struct {
 	SerialConfig     *serial.Config
@@ -84,14 +86,24 @@ func (r *RockBLOCKSerialConnection) serialWrite(m []byte) {
 	r.SerialOut <- m
 }
 
-func (r *RockBLOCKSerialConnection) serialWait(s string) error {
+type MsgEqualFunc func([]byte, []byte) bool
+
+func StringEqual(a, b []byte) bool {
+	return string(a) == string(b)
+}
+
+func StringPrefix(val, prefix []byte) bool {
+	return strings.HasPrefix(string(val), string(prefix))
+}
+
+func (r *RockBLOCKSerialConnection) serialWait(comp []byte, eq MsgEqualFunc) error {
 	timeoutTicker := time.NewTicker(5 * time.Minute)
 	for {
 		select {
 		case m := <-r.SerialIn:
 			fmt.Printf("received: %s\n", string(m))
 			r.processedBuffer = append(r.processedBuffer, m)
-			if string(m) == s {
+			if eq(m, comp) {
 				return nil
 			}
 		case <-timeoutTicker.C:
@@ -99,6 +111,14 @@ func (r *RockBLOCKSerialConnection) serialWait(s string) error {
 		}
 	}
 	return errors.New("serialWait(): Unknown error.")
+}
+
+func (r *RockBLOCKSerialConnection) serialWaitEqual(s string) error {
+	return r.serialWait([]byte(s), StringEqual)
+}
+
+func (r *RockBLOCKSerialConnection) serialWaitPrefix(prefix []byte) error {
+	return r.serialWait(prefix, StringPrefix)
 }
 
 func (r *RockBLOCKSerialConnection) Init() error {
@@ -112,14 +132,14 @@ func (r *RockBLOCKSerialConnection) Init() error {
 
 	// Send init command.
 	r.serialWrite([]byte("AT\r"))
-	err := r.serialWait("OK")
+	err := r.serialWaitEqual("OK")
 	if err != nil {
 		return fmt.Errorf("init() error: %s", err.Error())
 	}
 
 	// Turn off flow control.
 	r.serialWrite([]byte("AT&K0\r"))
-	err = r.serialWait("OK")
+	err = r.serialWaitEqual("OK")
 	if err != nil {
 		return fmt.Errorf("init() error: %s", err.Error())
 	}
@@ -131,7 +151,14 @@ func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
 	cmd := append(initTextMessage, msg...)
 	cmd = append(cmd, byte('\r'))
 	r.serialWrite(cmd)
-	return r.serialWait("OK")
+	err := r.serialWaitEqual("OK")
+	if err != nil {
+		return fmt.Errorf("SendText() error: %s", err.Error())
+	}
+	r.serialWrite(append(initSBDSessionExtended, byte('\r')))
+
+	// Wait for "+SBDIX:" message
+	return r.serialWaitPrefix([]byte("+SBDIX"))
 }
 
 func (r *RockBLOCKSerialConnection) binaryChecksum(msg []byte) []byte {
@@ -148,7 +175,7 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 	r.serialWrite(cmd)
 
 	// Wait for the "READY" message, then send the whole binary message plus the checksum.
-	err := r.serialWait("READY")
+	err := r.serialWaitEqual("READY")
 	if err != nil {
 		return fmt.Errorf("SendBinary() error: %s", err.Error())
 	}
@@ -157,11 +184,14 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 	r.serialWrite(msgWithChecksum)
 
 	// Wait for "0" (OK) response.
-	err = r.serialWait("0")
+	err = r.serialWaitEqual("0")
 	if err != nil {
 		return fmt.Errorf("SendBinary() error: %s", err.Error())
 	}
 
-	return nil
+	r.serialWrite(append(initSBDSessionExtended, byte('\r')))
+
+	// Wait for "+SBDIX:" message
+	return r.serialWaitPrefix([]byte("+SBDIX"))
 
 }
