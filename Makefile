@@ -1,2 +1,2 @@
 all:
-	go build weatherserver.go ADDS.go rockBLOCK.go
+	go build weatherserver.go ADDS.go

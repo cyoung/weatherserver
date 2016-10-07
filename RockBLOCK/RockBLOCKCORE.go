@@ -1,7 +1,9 @@
 package RockBLOCK
 
 import (
+	"errors"
 	"github.com/ajg/form"
+	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
@@ -36,15 +38,6 @@ type RockBLOCKCOREIncoming struct {
 	Data         []byte    `form:"data"`
 }
 
-// After decoding the 50 bytes.
-type IridiumMessage struct {
-	LatLngPresent bool
-	Lat           float64
-	Lng           float64
-	RequestType   int
-	Data          []byte
-}
-
 type RockBLOCKCOREOutgoing struct {
 	IMEI     string `form:"imei"`
 	Username string `form:"username"`
@@ -54,6 +47,8 @@ type RockBLOCKCOREOutgoing struct {
 
 func (m *RockBLOCKCOREIncoming) Process() IridiumMessage {
 	//TODO.
+	var ret IridiumMessage
+	return ret
 }
 
 func (m *RockBLOCKCOREOutgoing) Send() (string, error) {
@@ -61,18 +56,18 @@ func (m *RockBLOCKCOREOutgoing) Send() (string, error) {
 	m.Password = "b"
 	vals, err := form.EncodeToValues(m)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	// Get the response.
-	resp, err := http.Post("https://core.rock7.com/rockblock/MT", vals)
+	resp, err := http.PostForm("https://core.rock7.com/rockblock/MT", vals)
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
-	x := strings.Split(body, ",")
+	x := strings.Split(string(body), ",")
 	if x[0] == "OK" {
 		// Success.
 		return x[1], nil
@@ -80,9 +75,9 @@ func (m *RockBLOCKCOREOutgoing) Send() (string, error) {
 
 	// Is there a valid error response?
 	if len(x) > 2 {
-		return 0, errors.New(strings.Join(x[1:], ","))
+		return "", errors.New(strings.Join(x[1:], ","))
 	}
 
 	// Not even a valid error response.
-	return 0, errors.New("Invalid response.")
+	return "", errors.New("Invalid response.")
 }
