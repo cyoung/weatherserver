@@ -1,6 +1,9 @@
 package main
 
 import (
+	"github.com/ajg/form"
+	"net/http"
+	"strings"
 	"time"
 )
 
@@ -42,6 +45,44 @@ type IridiumMessage struct {
 	Data          []byte
 }
 
-func (m *RockBLOCKIncoming) Process() IridiumMessage {
+type RockBLOCKOutgoing struct {
+	IMEI     string `form:"imei"`
+	Username string `form:"username"`
+	Password string `form:"password"`
+	Data     []byte `form:"data"`
+}
 
+func (m *RockBLOCKIncoming) Process() IridiumMessage {
+	//TODO.
+}
+
+func (m *RockBLOCKOutgoing) Send() (string, error) {
+	m.Username = "a"
+	m.Password = "b"
+	vals, err := form.EncodeToValues(m)
+	if err != nil {
+		return 0, err
+	}
+
+	// Get the response.
+	resp, err := http.Post("https://core.rock7.com/rockblock/MT", vals)
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	x := strings.Split(body, ",")
+	if x[0] == "OK" {
+		// Success.
+		return x[1], nil
+	}
+
+	// Is there a valid error response?
+	if len(x) > 2 {
+		return 0, errors.New(strings.Join(x[1:], ","))
+	}
+
+	// Not even a valid error response.
+	return 0, errors.New("Invalid response.")
 }
