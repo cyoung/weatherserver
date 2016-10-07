@@ -1,4 +1,4 @@
-package main
+package RockBLOCK
 
 import (
 	"github.com/ajg/form"
@@ -26,7 +26,7 @@ func (t *RockBLOCKTime) UnmarshalText(text []byte) error {
 	return nil
 }
 
-type RockBLOCKIncoming struct {
+type RockBLOCKCOREIncoming struct {
 	IMEI         string    `form:"imei"`
 	MOMSN        int       `form:"momsn"`
 	TransmitTime time.Time `form:"transmit_time"`
@@ -45,18 +45,18 @@ type IridiumMessage struct {
 	Data          []byte
 }
 
-type RockBLOCKOutgoing struct {
+type RockBLOCKCOREOutgoing struct {
 	IMEI     string `form:"imei"`
 	Username string `form:"username"`
 	Password string `form:"password"`
 	Data     []byte `form:"data"`
 }
 
-func (m *RockBLOCKIncoming) Process() IridiumMessage {
+func (m *RockBLOCKCOREIncoming) Process() IridiumMessage {
 	//TODO.
 }
 
-func (m *RockBLOCKOutgoing) Send() (string, error) {
+func (m *RockBLOCKCOREOutgoing) Send() (string, error) {
 	m.Username = "a"
 	m.Password = "b"
 	vals, err := form.EncodeToValues(m)

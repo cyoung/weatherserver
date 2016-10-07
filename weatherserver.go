@@ -27,8 +27,8 @@ func handleMETARRequest(w http.ResponseWriter, r *http.Request) {
 
 func handleRockBLOCKMsg(w http.ResponseWriter, r *http.Request) {
 
-	// Decode the form into 'RockBLOCKIncoming'.
-	var msg RockBLOCKIncoming
+	// Decode the form into 'RockBLOCKCOREIncoming'.
+	var msg RockBLOCKCOREIncoming
 
 	d := form.NewDecoder(r.Body)
 
