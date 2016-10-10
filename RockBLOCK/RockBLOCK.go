@@ -1,5 +1,10 @@
 package RockBLOCK
 
+const (
+	MAX_MO_SZ = 340 // p.7 Iridium-9602-SBD-Transceiver-Product-Developers-Guide.pdf.
+	MAX_MT_SZ = 270 // p.7 Iridium-9602-SBD-Transceiver-Product-Developers-Guide.pdf.
+)
+
 // After decoding the 50 bytes.
 type IridiumMessage struct {
 	LatLngPresent bool
@@ -11,10 +16,10 @@ type IridiumMessage struct {
 
 // Iridium modem state.
 type SBDIXSerialResponse struct {
-	MOStatus string // MO status provides an indication of the disposition of the mobile originated transaction.
-	MOMSN    string // Mobile Originated Message Sequence Number.
-	MTStatus string // MT status provides an indication of the disposition of the mobile terminated transaction.
-	MTMSN    string // Mobile Terminated Message Sequence Number.
-	MTLen    string // The length in bytes of the mobile terminated SBD message received from the GSS.
-	MTQueued string // A count of mobile terminated SBD messages waiting at the GSS to be transferred to the device.
+	MOStatus int // MO status provides an indication of the disposition of the mobile originated transaction.
+	MOMSN    int // Mobile Originated Message Sequence Number.
+	MTStatus int // MT status provides an indication of the disposition of the mobile terminated transaction.
+	MTMSN    int // Mobile Terminated Message Sequence Number.
+	MTLen    int // The length in bytes of the mobile terminated SBD message received from the GSS.
+	MTQueued int // A count of mobile terminated SBD messages waiting at the GSS to be transferred to the device.
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tarm/serial"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,6 +22,7 @@ type RockBLOCKSerialConnection struct {
 	SerialOut        chan []byte
 	processedBuffer  [][]byte
 	ReceivedMessages []IridiumMessage
+	SBDIX            SBDIXSerialResponse
 }
 
 func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
@@ -60,6 +62,45 @@ func RockBLOCKScanSplit(data []byte, atEOF bool) (advance int, token []byte, err
 	return 0, nil, nil
 }
 
+/*
+	parseSBDIX().
+	 Parses a status response like:
+	  +SBDIX: 0, 4, 1, 2, 6, 9
+	 into a SBDIXSerialResponse structure, then saves it as 'SBDIX'.
+*/
+
+func (r *RockBLOCKSerialConnection) parseSBDIX(msg []byte) error {
+	s := string(msg)
+	if !strings.HasPrefix(s, "+SBDIX: ") {
+		return errors.New("parseSBDIX(): Not a valid +SBDIX response.")
+	}
+	s = s[7:]
+	x := strings.Split(s, ",")
+	if len(x) != 6 {
+		return errors.New("parseSBDIX(): Not a valid +SBDIX response.")
+	}
+	var parms []int
+	for i := 0; i < len(x); i++ {
+		c := strings.Trim(x[i], " ")
+		i, err := strconv.ParseInt(c, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parseSBDIX(): Not a valid +SBDIX response: %s.", s)
+		}
+		parms = append(parms, int(i))
+	}
+
+	r.SBDIX = SBDIXSerialResponse{
+		MOStatus: parms[0],
+		MOMSN:    parms[1],
+		MTStatus: parms[2],
+		MTMSN:    parms[3],
+		MTLen:    parms[4],
+		MTQueued: parms[5],
+	}
+
+	return nil
+}
+
 func (r *RockBLOCKSerialConnection) serialReader() {
 	scanner := bufio.NewScanner(r.SerialPort)
 	scanner.Split(RockBLOCKScanSplit)
@@ -67,6 +108,12 @@ func (r *RockBLOCKSerialConnection) serialReader() {
 		m := scanner.Bytes()
 		m = bytes.Trim(m, "\r\n")
 		if len(m) > 0 {
+			// Automatic parsing.
+			//TODO Parse all relevant information automatically.
+			if StringPrefix(m, []byte("+SBDIX")) {
+				r.parseSBDIX(m)
+			}
+
 			r.SerialIn <- bytes.Trim(m, "\r\n")
 		}
 	}
