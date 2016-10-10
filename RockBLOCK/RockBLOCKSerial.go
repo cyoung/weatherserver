@@ -14,6 +14,7 @@ import (
 var initTextMessage = []byte("AT+SBDWT=")
 var initBinaryMessage = []byte("AT+SBDWB=")
 var initSBDSessionExtended = []byte("AT+SBDIX")
+var getSignalQualityMessage = []byte("AT+CSQ=?")
 
 type RockBLOCKSerialConnection struct {
 	SerialConfig     *serial.Config
@@ -23,6 +24,7 @@ type RockBLOCKSerialConnection struct {
 	processedBuffer  [][]byte
 	ReceivedMessages []IridiumMessage
 	SBDIX            SBDIXSerialResponse
+	SignalQuality    int
 }
 
 func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
@@ -101,6 +103,21 @@ func (r *RockBLOCKSerialConnection) parseSBDIX(msg []byte) error {
 	return nil
 }
 
+func (r *RockBLOCKSerialConnection) parseCSQ(msg []byte) error {
+	s := string(msg)
+	if !strings.HasPrefix(s, "+CSQ:") {
+		return errors.New("parseCSQ(): Not a valid +SBDIX response.")
+	}
+	s = s[5:]
+	v := strings.Trim(s, " ")
+	i, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parseCSQ(): Not a valid +CSQ response: %s.", s)
+	}
+	r.SignalQuality = int(i)
+	return nil
+}
+
 func (r *RockBLOCKSerialConnection) serialReader() {
 	scanner := bufio.NewScanner(r.SerialPort)
 	scanner.Split(RockBLOCKScanSplit)
@@ -110,8 +127,11 @@ func (r *RockBLOCKSerialConnection) serialReader() {
 		if len(m) > 0 {
 			// Automatic parsing.
 			//TODO Parse all relevant information automatically.
-			if StringPrefix(m, []byte("+SBDIX")) {
+			if StringPrefix(m, []byte("+SBDIX:")) {
 				r.parseSBDIX(m)
+			}
+			if StringPrefix(m, []byte("+CSQ:")) {
+				r.parseCSQ(m)
 			}
 
 			r.SerialIn <- bytes.Trim(m, "\r\n")
@@ -205,7 +225,7 @@ func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
 	r.serialWrite(append(initSBDSessionExtended, byte('\r')))
 
 	// Wait for "+SBDIX:" message
-	return r.serialWaitPrefix([]byte("+SBDIX"))
+	return r.serialWaitPrefix([]byte("+SBDIX:"))
 }
 
 func (r *RockBLOCKSerialConnection) binaryChecksum(msg []byte) []byte {
@@ -239,6 +259,17 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 	r.serialWrite(append(initSBDSessionExtended, byte('\r')))
 
 	// Wait for "+SBDIX:" message
-	return r.serialWaitPrefix([]byte("+SBDIX"))
+	return r.serialWaitPrefix([]byte("+SBDIX:"))
+
+}
+
+func (r *RockBlockSerialConnection) GetSignalQuality() (int, error) {
+	msg := append(getSignalQualityMessage, byte('\r'))
+	r.serialWrite(msg)
+	if err := r.serialWaitPrefix([]byte("+CSQ:")); err != nil {
+		return -1, err
+	}
+
+	return r.SignalQuality, nil
 
 }

@@ -23,3 +23,7 @@ type SBDIXSerialResponse struct {
 	MTLen    int // The length in bytes of the mobile terminated SBD message received from the GSS.
 	MTQueued int // A count of mobile terminated SBD messages waiting at the GSS to be transferred to the device.
 }
+
+//TODO: Read 9602 outputs on:
+//NetAv - network available. High = yes.
+//RI - ring indicator. Low = ring.
