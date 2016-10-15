@@ -1,3 +1,11 @@
+//SBDDET
+//SBDDSC
+//SBDREG
+//SBDAREG
+//SBDMTA
+
+//AT+SBDD0 - clear MO buffer
+
 package RockBLOCK
 
 import (
@@ -14,7 +22,8 @@ import (
 var initTextMessage = []byte("AT+SBDWT=")
 var initBinaryMessage = []byte("AT+SBDWB=")
 var initSBDSessionExtended = []byte("AT+SBDIX")
-var getSignalQualityMessage = []byte("AT+CSQ=?")
+var getSignalQualityMessage = []byte("AT+CSQ")
+var downloadBinaryMessage = []byte("AT+SBDRT")
 
 type RockBLOCKSerialConnection struct {
 	SerialConfig     *serial.Config
@@ -271,5 +280,19 @@ func (r *RockBlockSerialConnection) GetSignalQuality() (int, error) {
 	}
 
 	return r.SignalQuality, nil
+
+}
+
+func (r *RockBlockSerialConnection) DownloadMessage() error {
+	// Check if we have messages waiting.
+	if SBDIX.MTStatus != 1 {
+		// No messages.
+		return errors.New("DownloadMessages(): No messages waiting.")
+	}
+
+	// Initiate the download.
+	msg := append(downloadBinaryMessage, byte('\r'))
+
+	//TODO: Switch to data mode, specified number of bytes.
 
 }
