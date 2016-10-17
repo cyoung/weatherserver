@@ -1,6 +1,7 @@
 package RockBLOCK
 
 import (
+	"encoding/hex"
 	"errors"
 	"github.com/ajg/form"
 	"io/ioutil"
@@ -54,6 +55,16 @@ func (m *RockBLOCKCOREIncoming) Process() IridiumMessage {
 func (m *RockBLOCKCOREOutgoing) Send() (string, error) {
 	m.Username = CORE_USER
 	m.Password = CORE_PASS
+
+	if len(m.IMEI) == 0 || len(m.Data) == 0 {
+		return "", errors.New("Insufficient data.")
+	}
+
+	// Hex-encode the 'Data' value.
+	encodedData := make([]byte, hex.EncodedLen(len(m.Data)))
+	hex.Encode(encodedData, m.Data)
+	m.Data = encodedData
+
 	vals, err := form.EncodeToValues(m)
 	if err != nil {
 		return "", err
