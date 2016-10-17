@@ -52,8 +52,8 @@ func (m *RockBLOCKCOREIncoming) Process() IridiumMessage {
 }
 
 func (m *RockBLOCKCOREOutgoing) Send() (string, error) {
-	m.Username = "a"
-	m.Password = "b"
+	m.Username = CORE_USER
+	m.Password = CORE_PASS
 	vals, err := form.EncodeToValues(m)
 	if err != nil {
 		return "", err
