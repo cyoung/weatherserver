@@ -7,11 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
-
-var mu *sync.Mutex
 
 // From stratux.
 type SituationData struct {
@@ -60,9 +57,7 @@ func msgSender() {
 	for {
 		m := <-msgChan
 		for {
-			mu.Lock()
 			err := rb.SendText([]byte(m))
-			mu.Unlock()
 			// Try until successful.
 			if err != nil {
 				fmt.Printf("send error: %s\n", err.Error())
@@ -97,7 +92,6 @@ func situationGetter() {
 }
 
 func main() {
-	mu = &sync.Mutex{}
 	r, err := RockBLOCK.NewRockBLOCKSerial()
 	if err != nil {
 		fmt.Printf("init error: %s\n", err.Error())
@@ -115,7 +109,6 @@ func main() {
 
 	for {
 		<-sendTicker.C
-		mu.Lock()
 		t, err := r.GetTime()
 		if err != nil {
 			fmt.Printf("time error: %s\n", err.Error())
@@ -124,7 +117,6 @@ func main() {
 		} else {
 			fmt.Printf("%s\n", t)
 		}
-		mu.Unlock()
 
 		tB, _ := t.MarshalText()
 		tS := string(tB)

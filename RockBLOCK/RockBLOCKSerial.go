@@ -14,6 +14,7 @@ import (
 	"github.com/tarm/serial"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,7 @@ type RockBLOCKSerialConnection struct {
 	SBDI             SBDISerialResponse
 	SignalQuality    int
 	SystemTime       time.Time
+	mu               *sync.Mutex
 }
 
 func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
@@ -52,6 +54,8 @@ func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
 	// Serial port opened successfully.
 	r.SerialConfig = cnf
 	r.SerialPort = p
+	// Create mutex.
+	r.mu = &sync.Mutex{}
 
 	// Initialize the device. If there's an error, return it.
 	err = r.Init()
@@ -228,6 +232,8 @@ func (r *RockBLOCKSerialConnection) serialWaitPrefix(prefix []byte) error {
 }
 
 func (r *RockBLOCKSerialConnection) Init() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	// Set up the read/write channels.
 	r.SerialIn = make(chan []byte)
 	r.SerialOut = make(chan []byte)
@@ -260,6 +266,9 @@ func (r *RockBLOCKSerialConnection) clearBuffer() error {
 }
 
 func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.clearBuffer()
 	cmd := append(initTextMessage, msg...)
 	cmd = append(cmd, byte('\r'))
@@ -299,6 +308,9 @@ func (r *RockBLOCKSerialConnection) binaryChecksum(msg []byte) []byte {
 }
 
 func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	msgLen := len(msg)
 	cmd := append(initBinaryMessage, []byte(fmt.Sprintf("%d\r", msgLen))...)
 	r.serialWrite(cmd)
@@ -335,7 +347,7 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 
 }
 
-func (r *RockBLOCKSerialConnection) GetSignalQuality() (int, error) {
+func (r *RockBLOCKSerialConnection) getSignalQuality() (int, error) {
 	msg := append(getSignalQualityMessage, byte('\r'))
 	r.serialWrite(msg)
 	if err := r.serialWaitPrefix([]byte("+CSQ:")); err != nil {
@@ -352,6 +364,9 @@ func (r *RockBLOCKSerialConnection) GetSignalQuality() (int, error) {
 	 Checks once per 5 seconds.
 */
 func (r *RockBLOCKSerialConnection) WaitForNetwork(t time.Duration) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	finishTicker := time.NewTicker(t)
 	checkTicker := time.NewTicker(5 * time.Second)
 	for {
@@ -359,7 +374,7 @@ func (r *RockBLOCKSerialConnection) WaitForNetwork(t time.Duration) error {
 		case <-finishTicker.C:
 			return errors.New("Timeout.")
 		case <-checkTicker.C:
-			signal, err := r.GetSignalQuality()
+			signal, err := r.getSignalQuality()
 			if err != nil {
 				return err
 			}
@@ -372,6 +387,9 @@ func (r *RockBLOCKSerialConnection) WaitForNetwork(t time.Duration) error {
 }
 
 func (r *RockBLOCKSerialConnection) DownloadMessage() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	// Check if we have messages waiting.
 	if r.SBDI.MTStatus != 1 {
 		// No messages.
@@ -387,6 +405,9 @@ func (r *RockBLOCKSerialConnection) DownloadMessage() error {
 }
 
 func (r *RockBLOCKSerialConnection) GetTime() (time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	msg := append(requestSystemTimeMessage, byte('\r'))
 	r.serialWrite(msg)
 	if err := r.serialWaitPrefix([]byte("-MSSTM:")); err != nil {
