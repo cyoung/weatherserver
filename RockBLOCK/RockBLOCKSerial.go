@@ -23,7 +23,7 @@ var initBinaryMessage = []byte("AT+SBDWB=")
 var initSBDSessionExtended = []byte("AT+SBDIX")
 var initSBDSession = []byte("AT+SBDI")
 var getSignalQualityMessage = []byte("AT+CSQ")
-var downloadBinaryMessage = []byte("AT+SBDRT")
+var downloadBinaryMessage = []byte("AT+SBDRB")
 var requestSystemTimeMessage = []byte("AT-MSSTM")
 var clearBuffers = []byte("AT+SBDD0")
 
@@ -38,7 +38,11 @@ type RockBLOCKSerialConnection struct {
 	SignalQuality    int
 	SystemTime       time.Time
 	mu               *sync.Mutex
+	MTMessages       [][]byte
+	msgHandler       RockBLOCKMTMessageHandler // Callback.
 }
+
+type RockBLOCKMTMessageHandler func([]byte) error
 
 func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
 	r = new(RockBLOCKSerialConnection)
@@ -161,7 +165,7 @@ func (r *RockBLOCKSerialConnection) serialReader() {
 	scanner.Split(RockBLOCKScanSplit)
 	for scanner.Scan() {
 		m := scanner.Bytes()
-		m = bytes.Trim(m, "\r\n")
+		m = bytes.Trim(m, "\r")
 		if len(m) > 0 {
 			// Automatic parsing.
 			//TODO Parse all relevant information automatically.
@@ -205,6 +209,10 @@ func StringPrefix(val, prefix []byte) bool {
 	return strings.HasPrefix(string(val), string(prefix))
 }
 
+func StringSuffix(val, suffix []byte) bool {
+	return strings.HasSuffix(string(val), string(suffix))
+}
+
 // For parsed commands, the return value comes after it has been parsed.
 func (r *RockBLOCKSerialConnection) serialWait(comp []byte, eq MsgEqualFunc) error {
 	timeoutTicker := time.NewTicker(5 * time.Minute)
@@ -229,6 +237,10 @@ func (r *RockBLOCKSerialConnection) serialWaitEqual(s string) error {
 
 func (r *RockBLOCKSerialConnection) serialWaitPrefix(prefix []byte) error {
 	return r.serialWait(prefix, StringPrefix)
+}
+
+func (r *RockBLOCKSerialConnection) serialWaitSuffix(suffix []byte) error {
+	return r.serialWait(suffix, StringSuffix)
 }
 
 func (r *RockBLOCKSerialConnection) Init() error {
@@ -295,6 +307,9 @@ func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
 		return fmt.Errorf("Send message error: %v", r.SBDI)
 	}
 
+	// Retrieve any message from the buffer, if any.
+	r.downloadMessage()
+
 	return nil
 
 }
@@ -307,10 +322,12 @@ func (r *RockBLOCKSerialConnection) binaryChecksum(msg []byte) []byte {
 	return []byte{byte((sum & 0xFF00) >> 8), byte(sum & 0xFF)}
 }
 
+//TESTME.
 func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.clearBuffer()
 	msgLen := len(msg)
 	cmd := append(initBinaryMessage, []byte(fmt.Sprintf("%d\r", msgLen))...)
 	r.serialWrite(cmd)
@@ -338,8 +355,13 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 		return err
 	}
 
+	err = r.serialWaitEqual("OK")
+	if err != nil {
+		return fmt.Errorf("SendText() error: %s", err.Error())
+	}
+
 	// Check if message was sent successfully.
-	if r.SBDI.MOStatus != 1 {
+	if r.SBDI.MOStatus != 2 {
 		return fmt.Errorf("Send message error: %v", r.SBDI)
 	}
 
@@ -386,24 +408,6 @@ func (r *RockBLOCKSerialConnection) WaitForNetwork(t time.Duration) error {
 	return errors.New("Timeout.")
 }
 
-func (r *RockBLOCKSerialConnection) DownloadMessage() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Check if we have messages waiting.
-	if r.SBDI.MTStatus != 1 {
-		// No messages.
-		return errors.New("DownloadMessages(): No messages waiting.")
-	}
-
-	// Initiate the download.
-	_ = append(downloadBinaryMessage, byte('\r'))
-
-	//TODO: Switch to data mode, specified number of bytes.
-
-	return nil
-}
-
 func (r *RockBLOCKSerialConnection) GetTime() (time.Time, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -417,4 +421,72 @@ func (r *RockBLOCKSerialConnection) GetTime() (time.Time, error) {
 	r.serialWaitEqual("OK")
 
 	return r.SystemTime, nil
+}
+
+func (r *RockBLOCKSerialConnection) downloadMessage() error {
+	// Check if we have messages waiting.
+	//	if r.SBDI.MTStatus != 1 {
+	// No messages.
+	//		return errors.New("downloadMessage(): No messages waiting.")
+	//	}
+
+	// Initiate the download.
+	msg := append(downloadBinaryMessage, byte('\r'))
+	r.serialWrite(msg)
+
+	err := r.serialWaitSuffix([]byte("OK")) // Device sends "OK" after the transfer.
+	if err != nil {
+		return err
+	}
+
+	// Work backwards in r.processedBuffer.
+	myBuf := make([][]byte, 0)
+	for i := len(r.processedBuffer) - 1; i > 0; i-- {
+		if string(r.processedBuffer[i]) == string(downloadBinaryMessage) {
+			// We've arrived to the last 'downloadBinaryMessage' acknowledgement, so stop here.
+			break
+		}
+		myBuf = append([][]byte{r.processedBuffer[i]}, myBuf...) // Prepend data.
+	}
+
+	if len(myBuf) == 0 || len(myBuf[len(myBuf)-1]) < 2 {
+		return errors.New("downloadMessage(): Invalid response format.")
+	}
+
+	myBuf = myBuf[:len(myBuf)-1] // Remove the last message - "OK".
+
+	// Re-join on '\r'.
+	binaryMsg := bytes.Join(myBuf, []byte("\r"))
+
+	// Get to work on binaryMsg.
+
+	// Need at least the first two bytes for the length of the message, then two final bytes for the checksum.
+	if len(binaryMsg) < 4 {
+		return errors.New("downloadMessage(): Response too short.")
+	}
+
+	msgLen := int(binaryMsg[0])<<8 | int(binaryMsg[1])
+	msgChecksum := binaryMsg[len(binaryMsg)-2:] // Last two bytes.
+	finalMsg := binaryMsg[2 : len(binaryMsg)-2]
+
+	// Verify message sizes.
+	if msgLen != len(finalMsg) {
+		return fmt.Errorf("downloadMessage(): Size mismatch: msgLen=%d, len(finalMsg)=%d.", msgLen, len(finalMsg))
+	}
+
+	// Calculate the checksum of finalMsg to verify.
+	myChecksum := r.binaryChecksum(finalMsg)
+
+	if msgChecksum[0] != myChecksum[0] || msgChecksum[1] != myChecksum[1] {
+		return fmt.Errorf("downloadMessage(): Bad checksum: msgChecksum=%02x%02x, myChecksum=%02x02x", msgChecksum[0], msgChecksum[1], myChecksum[0], myChecksum[1])
+	}
+
+	if msgHandler != nil {
+		msgHandler(finalMsg)
+	}
+	return nil
+}
+
+func (r *RockBLOCKSerialConnection) SetMessageHandler(f RockBLOCKMTMessageHandler) {
+	r.msgHandler = f
 }
