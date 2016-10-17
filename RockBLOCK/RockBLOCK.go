@@ -15,7 +15,7 @@ type IridiumMessage struct {
 }
 
 // Iridium modem state.
-type SBDIXSerialResponse struct {
+type SBDISerialResponse struct {
 	MOStatus int // MO status provides an indication of the disposition of the mobile originated transaction.
 	MOMSN    int // Mobile Originated Message Sequence Number.
 	MTStatus int // MT status provides an indication of the disposition of the mobile terminated transaction.
