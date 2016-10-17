@@ -1,10 +1,8 @@
-//SBDDET
-//SBDDSC
-//SBDREG
-//SBDAREG
-//SBDMTA
-
-//AT+SBDD0 - clear MO buffer
+//+SBDDET
+//+SBDDSC
+//+SBDREG
+//+SBDAREG
+//+SBDMTA
 
 package RockBLOCK
 
@@ -22,8 +20,11 @@ import (
 var initTextMessage = []byte("AT+SBDWT=")
 var initBinaryMessage = []byte("AT+SBDWB=")
 var initSBDSessionExtended = []byte("AT+SBDIX")
+var initSBDSession = []byte("AT+SBDI")
 var getSignalQualityMessage = []byte("AT+CSQ")
 var downloadBinaryMessage = []byte("AT+SBDRT")
+var requestSystemTimeMessage = []byte("AT-MSSTM")
+var clearBuffers = []byte("AT+SBDD0")
 
 type RockBLOCKSerialConnection struct {
 	SerialConfig     *serial.Config
@@ -32,15 +33,16 @@ type RockBLOCKSerialConnection struct {
 	SerialOut        chan []byte
 	processedBuffer  [][]byte
 	ReceivedMessages []IridiumMessage
-	SBDIX            SBDIXSerialResponse
+	SBDI             SBDISerialResponse
 	SignalQuality    int
+	SystemTime       time.Time
 }
 
 func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
 	r = new(RockBLOCKSerialConnection)
 
 	// Open serial port.
-	cnf := &serial.Config{Name: "/dev/pts/4", Baud: 19200}
+	cnf := &serial.Config{Name: "/dev/ttyUSB0", Baud: 19200}
 	p, errn := serial.OpenPort(cnf)
 	if errn != nil {
 		err = fmt.Errorf("serial port err: %s\n", errn.Error())
@@ -74,33 +76,34 @@ func RockBLOCKScanSplit(data []byte, atEOF bool) (advance int, token []byte, err
 }
 
 /*
-	parseSBDIX().
+	parseSBDI().
 	 Parses a status response like:
 	  +SBDIX: 0, 4, 1, 2, 6, 9
-	 into a SBDIXSerialResponse structure, then saves it as 'SBDIX'.
+	  +SBDI: 0, 4, 1, 2, 6, 9
+	 into a SBDISerialResponse structure, then saves it as 'SBDI'.
 */
 
-func (r *RockBLOCKSerialConnection) parseSBDIX(msg []byte) error {
+func (r *RockBLOCKSerialConnection) parseSBDI(msg []byte) error {
 	s := string(msg)
-	if !strings.HasPrefix(s, "+SBDIX: ") {
-		return errors.New("parseSBDIX(): Not a valid +SBDIX response.")
+	if !strings.HasPrefix(s, "+SBDI") {
+		return errors.New("parseSBDI(): Not a valid +SBDI_ response.")
 	}
 	s = s[7:]
 	x := strings.Split(s, ",")
 	if len(x) != 6 {
-		return errors.New("parseSBDIX(): Not a valid +SBDIX response.")
+		return errors.New("parseSBDI(): Not a valid +SBDI_ response.")
 	}
 	var parms []int
 	for i := 0; i < len(x); i++ {
 		c := strings.Trim(x[i], " ")
 		i, err := strconv.ParseInt(c, 10, 32)
 		if err != nil {
-			return fmt.Errorf("parseSBDIX(): Not a valid +SBDIX response: %s.", s)
+			return fmt.Errorf("parseSBDI(): Not a valid +SBDI_ response: %s.", s)
 		}
 		parms = append(parms, int(i))
 	}
 
-	r.SBDIX = SBDIXSerialResponse{
+	r.SBDI = SBDISerialResponse{
 		MOStatus: parms[0],
 		MOMSN:    parms[1],
 		MTStatus: parms[2],
@@ -115,7 +118,7 @@ func (r *RockBLOCKSerialConnection) parseSBDIX(msg []byte) error {
 func (r *RockBLOCKSerialConnection) parseCSQ(msg []byte) error {
 	s := string(msg)
 	if !strings.HasPrefix(s, "+CSQ:") {
-		return errors.New("parseCSQ(): Not a valid +SBDIX response.")
+		return errors.New("parseCSQ(): Not a valid +SBDI response.")
 	}
 	s = s[5:]
 	v := strings.Trim(s, " ")
@@ -124,6 +127,28 @@ func (r *RockBLOCKSerialConnection) parseCSQ(msg []byte) error {
 		return fmt.Errorf("parseCSQ(): Not a valid +CSQ response: %s.", s)
 	}
 	r.SignalQuality = int(i)
+	return nil
+}
+
+func (r *RockBLOCKSerialConnection) parseMSSTM(msg []byte) error {
+	s := string(msg)
+	if !strings.HasPrefix(s, "-MSSTM:") {
+		return errors.New("parseMSSTM(): Not a valid -MSSTM response.")
+	}
+	s = s[7:]
+	v := strings.Trim(s, " ")
+	i, err := strconv.ParseInt(v, 16, 32)
+	if err != nil {
+		return fmt.Errorf("parseMSSTM(): Not a valid -MSSTM response.")
+	}
+
+	// Era2: https://www.g1sat.com/download/iridium/2015%20Iridium%20Time%20Epoch%20Change%20ITN0018%20v1.2.pdf.
+	iridiumEpochTime := time.Date(2014, 5, 11, 14, 23, 55, 0, time.UTC)
+
+	// -MMSTM returns the number of 90ms intervals since Iridium Epoch, unless it has rolled over.
+	//FIXME: Rollover detection.
+
+	r.SystemTime = iridiumEpochTime.Add(90 * time.Millisecond * time.Duration(i))
 	return nil
 }
 
@@ -136,11 +161,14 @@ func (r *RockBLOCKSerialConnection) serialReader() {
 		if len(m) > 0 {
 			// Automatic parsing.
 			//TODO Parse all relevant information automatically.
-			if StringPrefix(m, []byte("+SBDIX:")) {
-				r.parseSBDIX(m)
+			if StringPrefix(m, []byte("+SBDI")) {
+				r.parseSBDI(m)
 			}
 			if StringPrefix(m, []byte("+CSQ:")) {
 				r.parseCSQ(m)
+			}
+			if StringPrefix(m, []byte("-MSSTM:")) {
+				r.parseMSSTM(m)
 			}
 
 			r.SerialIn <- bytes.Trim(m, "\r\n")
@@ -159,6 +187,7 @@ func (r *RockBLOCKSerialConnection) serialWriter() {
 }
 
 func (r *RockBLOCKSerialConnection) serialWrite(m []byte) {
+	fmt.Printf("sent: %s\n", string(m))
 	r.SerialOut <- m
 }
 
@@ -172,6 +201,7 @@ func StringPrefix(val, prefix []byte) bool {
 	return strings.HasPrefix(string(val), string(prefix))
 }
 
+// For parsed commands, the return value comes after it has been parsed.
 func (r *RockBLOCKSerialConnection) serialWait(comp []byte, eq MsgEqualFunc) error {
 	timeoutTicker := time.NewTicker(5 * time.Minute)
 	for {
@@ -223,7 +253,14 @@ func (r *RockBLOCKSerialConnection) Init() error {
 	return nil
 }
 
+func (r *RockBLOCKSerialConnection) clearBuffer() error {
+	cmd := append(clearBuffers, byte('\r'))
+	r.serialWrite(cmd)
+	return r.serialWaitEqual("OK")
+}
+
 func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
+	r.clearBuffer()
 	cmd := append(initTextMessage, msg...)
 	cmd = append(cmd, byte('\r'))
 	r.serialWrite(cmd)
@@ -231,10 +268,26 @@ func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
 	if err != nil {
 		return fmt.Errorf("SendText() error: %s", err.Error())
 	}
-	r.serialWrite(append(initSBDSessionExtended, byte('\r')))
+	r.serialWrite(append(initSBDSession, byte('\r')))
 
-	// Wait for "+SBDIX:" message
-	return r.serialWaitPrefix([]byte("+SBDIX:"))
+	// Wait for "+SBDI:" message
+	err = r.serialWaitPrefix([]byte("+SBDI:"))
+	if err != nil {
+		return err
+	}
+
+	err = r.serialWaitEqual("OK")
+	if err != nil {
+		return fmt.Errorf("SendText() error: %s", err.Error())
+	}
+
+	// Check if message was sent successfully.
+	if r.SBDI.MOStatus != 2 {
+		return fmt.Errorf("Send message error: %v", r.SBDI)
+	}
+
+	return nil
+
 }
 
 func (r *RockBLOCKSerialConnection) binaryChecksum(msg []byte) []byte {
@@ -265,14 +318,24 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 		return fmt.Errorf("SendBinary() error: %s", err.Error())
 	}
 
-	r.serialWrite(append(initSBDSessionExtended, byte('\r')))
+	r.serialWrite(append(initSBDSession, byte('\r')))
 
-	// Wait for "+SBDIX:" message
-	return r.serialWaitPrefix([]byte("+SBDIX:"))
+	// Wait for "+SBDI:" message
+	err = r.serialWaitPrefix([]byte("+SBDI:"))
+	if err != nil {
+		return err
+	}
+
+	// Check if message was sent successfully.
+	if r.SBDI.MOStatus != 1 {
+		return fmt.Errorf("Send message error: %v", r.SBDI)
+	}
+
+	return nil
 
 }
 
-func (r *RockBlockSerialConnection) GetSignalQuality() (int, error) {
+func (r *RockBLOCKSerialConnection) GetSignalQuality() (int, error) {
 	msg := append(getSignalQualityMessage, byte('\r'))
 	r.serialWrite(msg)
 	if err := r.serialWaitPrefix([]byte("+CSQ:")); err != nil {
@@ -283,16 +346,54 @@ func (r *RockBlockSerialConnection) GetSignalQuality() (int, error) {
 
 }
 
-func (r *RockBlockSerialConnection) DownloadMessage() error {
+/*
+	WaitForNetwork().
+	 Returns nil if and only if a signal quality indicator greater than 0 is encountered in less than 't'.
+	 Checks once per 5 seconds.
+*/
+func (r *RockBLOCKSerialConnection) WaitForNetwork(t time.Duration) error {
+	finishTicker := time.NewTicker(t)
+	checkTicker := time.NewTicker(5 * time.Second)
+	for {
+		select {
+		case <-finishTicker.C:
+			return errors.New("Timeout.")
+		case <-checkTicker.C:
+			signal, err := r.GetSignalQuality()
+			if err != nil {
+				return err
+			}
+			if signal != 0 {
+				return nil
+			}
+		}
+	}
+	return errors.New("Timeout.")
+}
+
+func (r *RockBLOCKSerialConnection) DownloadMessage() error {
 	// Check if we have messages waiting.
-	if SBDIX.MTStatus != 1 {
+	if r.SBDI.MTStatus != 1 {
 		// No messages.
 		return errors.New("DownloadMessages(): No messages waiting.")
 	}
 
 	// Initiate the download.
-	msg := append(downloadBinaryMessage, byte('\r'))
+	_ = append(downloadBinaryMessage, byte('\r'))
 
 	//TODO: Switch to data mode, specified number of bytes.
 
+	return nil
+}
+
+func (r *RockBLOCKSerialConnection) GetTime() (time.Time, error) {
+	msg := append(requestSystemTimeMessage, byte('\r'))
+	r.serialWrite(msg)
+	if err := r.serialWaitPrefix([]byte("-MSSTM:")); err != nil {
+		return time.Now(), err // time.Now(): Best effort.
+	}
+
+	r.serialWaitEqual("OK")
+
+	return r.SystemTime, nil
 }
