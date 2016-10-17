@@ -29,13 +29,13 @@ func (t *RockBLOCKTime) UnmarshalText(text []byte) error {
 }
 
 type RockBLOCKCOREIncoming struct {
-	IMEI         string    `form:"imei"`
-	MOMSN        int       `form:"momsn"`
-	TransmitTime time.Time `form:"transmit_time"`
-	IridiumLat   float64   `form:"iridium_latitude"`
-	IridiumLng   float64   `form:"iridium_longitude"`
-	IridiumCEP   float64   `form:"iridium_cep"`
-	Data         []byte    `form:"data"`
+	IMEI         string `form:"imei"`
+	MOMSN        string `form:"momsn"`
+	TransmitTime string `form:"transmit_time"`
+	IridiumLat   string `form:"iridium_latitude"`
+	IridiumLng   string `form:"iridium_longitude"`
+	IridiumCEP   string `form:"iridium_cep"`
+	Data         string `form:"data"`
 }
 
 type RockBLOCKCOREOutgoing struct {
