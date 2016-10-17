@@ -13,8 +13,8 @@ import (
 
 var mu *sync.Mutex
 
+// From stratux.
 type SituationData struct {
-
 	// From GPS.
 	LastFixSinceMidnightUTC  float32
 	Lat                      float32
