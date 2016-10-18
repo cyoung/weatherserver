@@ -436,10 +436,10 @@ func (r *RockBLOCKSerialConnection) GetTime() (time.Time, error) {
 
 func (r *RockBLOCKSerialConnection) downloadMessage() error {
 	// Check if we have messages waiting.
-	//	if r.SBDI.MTStatus != 1 {
-	// No messages.
-	//		return errors.New("downloadMessage(): No messages waiting.")
-	//	}
+	if r.SBDI.MTStatus != 1 {
+		// No messages.
+		return errors.New("downloadMessage(): No messages waiting.")
+	}
 
 	// Initiate the download.
 	msg := append(downloadBinaryMessage, byte('\r'))
