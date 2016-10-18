@@ -166,7 +166,7 @@ func (r *RockBLOCKSerialConnection) serialReader() {
 	scanner.Split(RockBLOCKScanSplit)
 	for scanner.Scan() {
 		m := scanner.Bytes()
-		m = bytes.Trim(m, "\r")
+		m = bytes.Trim(m, "\r\n")
 		if len(m) > 0 {
 			// Automatic parsing.
 			//TODO Parse all relevant information automatically.
@@ -180,7 +180,7 @@ func (r *RockBLOCKSerialConnection) serialReader() {
 				r.parseMSSTM(m)
 			}
 
-			r.SerialIn <- bytes.Trim(m, "\r\n")
+			r.SerialIn <- bytes.Trim(m, "\r")
 		}
 	}
 }
@@ -306,7 +306,7 @@ func (r *RockBLOCKSerialConnection) SendText(msg []byte) error {
 	}
 
 	// Check if message was sent successfully.
-	if r.SBDI.MOStatus != 2 {
+	if r.SBDI.MOStatus != 1 {
 		return fmt.Errorf("Send message error: %v", r.SBDI)
 	}
 
@@ -350,6 +350,11 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 		return fmt.Errorf("SendBinary() error: %s", err.Error())
 	}
 
+	err = r.serialWaitEqual("OK")
+	if err != nil {
+		return fmt.Errorf("SendText() error: %s", err.Error())
+	}
+
 	r.serialWrite(append(initSBDSession, byte('\r')))
 
 	// Wait for "+SBDI:" message
@@ -364,9 +369,12 @@ func (r *RockBLOCKSerialConnection) SendBinary(msg []byte) error {
 	}
 
 	// Check if message was sent successfully.
-	if r.SBDI.MOStatus != 2 {
+	if r.SBDI.MOStatus != 1 {
 		return fmt.Errorf("Send message error: %v", r.SBDI)
 	}
+
+	// Retrieve any message from the buffer, if any.
+	r.downloadMessage()
 
 	return nil
 
