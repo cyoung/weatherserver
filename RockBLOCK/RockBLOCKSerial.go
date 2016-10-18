@@ -28,18 +28,19 @@ var requestSystemTimeMessage = []byte("AT-MSSTM")
 var clearBuffers = []byte("AT+SBDD0")
 
 type RockBLOCKSerialConnection struct {
-	SerialConfig     *serial.Config
-	SerialPort       *serial.Port
-	SerialIn         chan []byte
-	SerialOut        chan []byte
-	processedBuffer  [][]byte
-	ReceivedMessages []IridiumMessage
-	SBDI             SBDISerialResponse
-	SignalQuality    int
-	SystemTime       time.Time
-	mu               *sync.Mutex
-	MTMessages       [][]byte
-	msgHandler       RockBLOCKMTMessageHandler // Callback.
+	SerialConfig      *serial.Config
+	SerialPort        *serial.Port
+	SerialIn          chan []byte
+	SerialOut         chan []byte
+	processedBuffer   [][]byte
+	ReceivedMessages  []IridiumMessage
+	SBDI              SBDISerialResponse
+	SignalQuality     int
+	SystemTime        time.Time
+	mu                *sync.Mutex
+	MTMessages        [][]byte
+	msgHandler        RockBLOCKMTMessageHandler // Callback.
+	persistentMsgChan chan []byte
 }
 
 type RockBLOCKMTMessageHandler func([]byte) error
@@ -268,6 +269,8 @@ func (r *RockBLOCKSerialConnection) Init() error {
 		return fmt.Errorf("init() error: %s", err.Error())
 	}
 
+	go r.persistentMessageSender()
+
 	return nil
 }
 
@@ -489,4 +492,26 @@ func (r *RockBLOCKSerialConnection) downloadMessage() error {
 
 func (r *RockBLOCKSerialConnection) SetMessageHandler(f RockBLOCKMTMessageHandler) {
 	r.msgHandler = f
+}
+
+// Constantly retries each message until it is sent.
+func (r *RockBLOCKSerialConnection) persistentMessageSender() {
+	r.persistentMsgChan = make(chan []byte, 1024)
+	for {
+		m := <-r.persistentMsgChan
+		for {
+			err := r.SendBinary(m)
+			// Try until successful.
+			if err != nil {
+				fmt.Printf("send error: %s\n", err.Error())
+			} else {
+				fmt.Printf("sent\n")
+				break
+			}
+		}
+	}
+}
+
+func (r *RockBLOCKSerialConnection) SendBinaryPersistent(m []byte) {
+	r.persistentMsgChan <- m
 }

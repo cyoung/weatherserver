@@ -48,26 +48,7 @@ type SituationData struct {
 	LastAttitudeTime time.Time
 }
 
-var msgChan chan string
-
 var rb *RockBLOCK.RockBLOCKSerialConnection
-
-func msgSender() {
-	msgChan = make(chan string, 1024)
-	for {
-		m := <-msgChan
-		for {
-			err := rb.SendText([]byte(m))
-			// Try until successful.
-			if err != nil {
-				fmt.Printf("send error: %s\n", err.Error())
-			} else {
-				fmt.Printf("sent\n")
-				break
-			}
-		}
-	}
-}
 
 var mySituation SituationData
 
@@ -102,7 +83,6 @@ func main() {
 
 	rb = r
 
-	go msgSender()
 	go situationGetter()
 
 	sendTicker := time.NewTicker(2 * time.Minute)
@@ -112,7 +92,6 @@ func main() {
 		t, err := r.GetTime()
 		if err != nil {
 			fmt.Printf("time error: %s\n", err.Error())
-			mu.Unlock()
 			continue
 		} else {
 			fmt.Printf("%s\n", t)
@@ -124,7 +103,7 @@ func main() {
 		msg := fmt.Sprintf("%s,%0.4f,%0.4f", tS, mySituation.Lat, mySituation.Lng)
 		fmt.Printf("msg=%s | len=%d. sending\n", msg, len(msg))
 
-		msgChan <- msg
+		rb.SendBinaryPersistent([]byte(msg))
 
 	}
 
