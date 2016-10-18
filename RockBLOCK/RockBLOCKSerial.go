@@ -513,6 +513,9 @@ func (r *RockBLOCKSerialConnection) persistentMessageSender() {
 			if err != nil {
 				fmt.Printf("send error: %s\n", err.Error())
 			} else {
+				if r.msgHandler != nil {
+					r.msgHandler(append([]byte("sent: "), m...)) //FIXME: Set up a separate channel for "sent" notifications.
+				}
 				fmt.Printf("sent\n")
 				break
 			}

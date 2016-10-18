@@ -88,6 +88,27 @@ func handleRockBLOCKMsg(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("error inserting stats row to db: %s\n", err.Error())
 	}
 
+	// See if this is a plaintext weather request.
+	if strings.HasPrefix(msg.Data, "METAR ") {
+		x := strings.Split(msg.Data, " ")
+		metar, err := getLatestADDSMETAR(x[1])
+		if err == nil {
+			m := new(RockBLOCK.RockBLOCKCOREOutgoing)
+			m.IMEI = RockBLOCK.TEST_IMEI
+			m.Data = []byte(metar.Text)
+			if len(m.Data) > 50 {
+				m.Data = m.Data[:50]
+			}
+			a, err := m.Send()
+			fmt.Printf("attempt to send METAR %s\n", m.Data)
+			if err != nil {
+				fmt.Printf("a=%s, err=%s\n", a, err.Error())
+			} else {
+				fmt.Printf("a=%s\n", a)
+			}
+		}
+	}
+
 }
 
 func main() {
