@@ -481,8 +481,8 @@ func (r *RockBLOCKSerialConnection) downloadMessage() error {
 		return fmt.Errorf("downloadMessage(): Bad checksum: msgChecksum=%02x%02x, myChecksum=%02x02x", msgChecksum[0], msgChecksum[1], myChecksum[0], myChecksum[1])
 	}
 
-	if msgHandler != nil {
-		msgHandler(finalMsg)
+	if r.msgHandler != nil {
+		r.msgHandler(finalMsg)
 	}
 	return nil
 }
