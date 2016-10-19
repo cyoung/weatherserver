@@ -43,7 +43,17 @@ type RockBLOCKSerialConnection struct {
 	persistentMsgChan chan []byte
 }
 
-type RockBLOCKMTMessageHandler func([]byte) error
+type RockBLOCKCallbackInfo struct {
+	Data  []byte
+	State int // 0 = confirm sent, 1 = received.
+}
+
+const (
+	CALLBACK_CONFIRM_SENT = 0
+	CALLBACK_RECV         = 1
+)
+
+type RockBLOCKMTMessageHandler func(RockBLOCKCallbackInfo) error
 
 func NewRockBLOCKSerial() (r *RockBLOCKSerialConnection, err error) {
 	r = new(RockBLOCKSerialConnection)
@@ -493,7 +503,11 @@ func (r *RockBLOCKSerialConnection) downloadMessage() error {
 	}
 
 	if r.msgHandler != nil {
-		r.msgHandler(finalMsg)
+		conf := RockBLOCKCallbackInfo{
+			Data:  finalMsg,
+			State: CALLBACK_RECV,
+		}
+		r.msgHandler(conf)
 	}
 	return nil
 }
@@ -514,7 +528,11 @@ func (r *RockBLOCKSerialConnection) persistentMessageSender() {
 				fmt.Printf("send error: %s\n", err.Error())
 			} else {
 				if r.msgHandler != nil {
-					r.msgHandler(append([]byte("sent: "), m...)) //FIXME: Set up a separate channel for "sent" notifications.
+					conf := RockBLOCKCallbackInfo{
+						Data:  m,
+						State: CALLBACK_CONFIRM_SENT,
+					}
+					r.msgHandler(conf) //FIXME: Set up a separate channel for "sent" notifications.
 				}
 				fmt.Printf("sent\n")
 				break
