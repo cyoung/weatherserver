@@ -1,4 +1,4 @@
-package main
+package ADDS
 
 import (
 	"encoding/xml"
