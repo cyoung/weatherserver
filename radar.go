@@ -7,11 +7,17 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"sort"
+)
+
+const (
+	REDUCE_MATRIX_SZ = 8
 )
 
 // n0q raster values: https://mesonet.agron.iastate.edu/GIS/rasters.php?rid=2
 
 var n0qRaster = map[int]float64{
+	0:   -9999, // idx == 0 "empty pixel". Fake dBz value
 	1:   -32,
 	2:   -31.5,
 	3:   -31,
@@ -529,11 +535,6 @@ var n0qPalette = color.Palette{
 func findRasterVal(c color.Color) (float64, error) {
 	idx := n0qPalette.Index(c)
 
-	// "empty" pixel.
-	if idx == 0 {
-		return 0, errors.New("No data.")
-	}
-
 	// Check if we have information on this index.
 	if v, ok := n0qRaster[idx]; !ok {
 		return 0, errors.New("No data.")
@@ -541,6 +542,44 @@ func findRasterVal(c color.Color) (float64, error) {
 		return v, nil
 	}
 	return 0, errors.New("Error.")
+}
+
+func extractMatrix(bounds image.Rectangle, img image.Image, sz int) [][][][]color.Color {
+	ret := make([][][][]color.Color, bounds.Max.X/sz)
+	for i := 0; i < bounds.Max.X; i += sz {
+		ret[i/sz] = make([][][]color.Color, bounds.Max.Y/sz)
+		for j := 0; j < bounds.Max.Y; j += sz {
+			ret[i/sz][j/sz] = make([][]color.Color, sz)
+			for k := 0; k < sz; k++ {
+				ret[i/sz][j/sz][k] = make([]color.Color, sz)
+				for l := 0; l < sz; l++ {
+					ret[i/sz][j/sz][k][l] = img.At(i+k, j+l)
+				}
+			}
+		}
+	}
+	return ret
+}
+
+func getMaxIntensityFromMatrix(grp [][]color.Color) float64 {
+	var dBzs []float64
+	for i := 0; i < len(grp); i++ {
+		for j := 0; j < len(grp[i]); j++ {
+			dBz, _ := findRasterVal(grp[i][j])
+			dBzs = append(dBzs, dBz)
+		}
+	}
+	sort.Float64s(dBzs)
+	ret := dBzs[len(dBzs)-1] // Highest will be last in the sorted list.
+	return ret
+}
+
+func fillImage(newImg *image.NRGBA64, newColor color.Color, x, y, sz int) {
+	for i := 0; i < sz; i++ {
+		for j := 0; j < sz; j++ {
+			newImg.Set(x*sz+i, y*sz+j, newColor)
+		}
+	}
 }
 
 func main() {
@@ -566,33 +605,27 @@ func main() {
 
 	// Create new image with reduced color depth.
 	newImg := image.NewNRGBA64(bounds)
-	for i := 0; i < bounds.Max.X; i++ {
-		for j := 0; j < bounds.Max.Y; j++ {
-			oldColor := src.At(i, j)
-			_, _, _, a := oldColor.RGBA()
+
+	grp := extractMatrix(bounds, src, REDUCE_MATRIX_SZ)
+
+	for i := 0; i < len(grp); i++ {
+		for j := 0; j < len(grp[i]); j++ {
+			dBz := getMaxIntensityFromMatrix(grp[i][j])
 
 			var newColor color.RGBA
-			// Use alpha to determine if radar information is present or not.
-			if a != 0 {
-				dBz, err := findRasterVal(oldColor)
-				if err == nil {
-					fmt.Printf("found val=%f\n", dBz)
-				} else {
-					fmt.Printf("can't find val\n")
-				}
-
-				if dBz >= 40.0 {
-					newColor.R = 255
-				} else if dBz < 40.0 && dBz >= 20.0 {
-					newColor.B = 255
-				} else if dBz < 20.0 {
-					newColor.G = 255
-				}
-
-				newColor.A = 255
-				fmt.Printf("%d,%d,%d,%d\n", newColor.R, newColor.G, newColor.B, newColor.A)
+			newColor.A = 255
+			if dBz >= 40.0 {
+				newColor.R = 255
+			} else if dBz < 40.0 && dBz >= 20.0 {
+				newColor.B = 255
+			} else if dBz < 20.0 && dBz > -999 {
+				newColor.G = 255
+			} else if dBz <= -999 {
+				newColor.A = 0 // No data.
 			}
-			newImg.Set(i, j, newColor)
+
+			fillImage(newImg, newColor, i, j, REDUCE_MATRIX_SZ)
+
 		}
 	}
 
