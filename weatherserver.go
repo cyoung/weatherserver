@@ -22,7 +22,7 @@ func handleMETARRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad request.", http.StatusBadRequest)
 		return
 	}
-	metar, err := ADDS.getLatestADDSMETAR(x[1])
+	metar, err := ADDS.GetLatestADDSMETAR(x[1])
 	if err == nil {
 		w.Write([]byte(metar.Text + "\n"))
 	}
@@ -91,7 +91,7 @@ func handleRockBLOCKMsg(w http.ResponseWriter, r *http.Request) {
 	// See if this is a plaintext weather request.
 	if strings.HasPrefix(msg.Data, "METAR ") {
 		x := strings.Split(msg.Data, " ")
-		metar, err := ADDS.getLatestADDSMETAR(x[1])
+		metar, err := ADDS.GetLatestADDSMETAR(x[1])
 		if err == nil {
 			m := new(RockBLOCK.RockBLOCKCOREOutgoing)
 			m.IMEI = RockBLOCK.TEST_IMEI
