@@ -1,10 +1,10 @@
 package main
 
 import (
-	"./ADDS"
 	"./RockBLOCK"
 	"encoding/json"
 	"fmt"
+	"github.com/cyoung/ADDS"
 	"io/ioutil"
 	"net/http"
 	"strings"

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"./ADDS"
 	"fmt"
+	"github.com/cyoung/ADDS"
 )
 
 func main() {
