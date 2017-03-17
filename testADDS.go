@@ -19,7 +19,7 @@ func main() {
 		if numAirportsInResponse > 50 {
 			break
 		}
-		metar, err := ADDS.GetLatestADDSMETAR(a.ThisAirport.Ident)
+		metar, err := ADDS.GetLatestADDSMETARs(a.ThisAirport.Ident)
 		if err != nil {
 			fmt.Printf("err: %s\n", err.Error())
 			continue // Couldn't get METAR.
