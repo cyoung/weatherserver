@@ -111,7 +111,7 @@ func makeSendList() [][]byte {
 			for _, msg := range msgs {
 				if len(msg) > MAX_PACKET_SIZE {
 					fmt.Printf("WARNING! Message is larger than max packet size: '%s'\n", string(msg))
-					continue
+					//continue //FIXME: Add provisions for fragmented packets.
 				}
 				if len(ret) > 0 && (len(ret[len(ret)-1])+len(msg)+1) < MAX_PACKET_SIZE {
 					// Add this message to the last, with a '|' divider.
@@ -129,7 +129,7 @@ func makeSendList() [][]byte {
 
 var messageChan chan DataMessage
 
-func WeatherQueue() {
+func messageQueuer() {
 	messageQueue = make(map[string]DataMessage, 0)
 
 	var sendList [][]byte // Current message list.
@@ -201,7 +201,7 @@ func main() {
 	selfGeo = geo.NewPoint(myConfig.StationLat, myConfig.StationLng)
 
 	go weatherUpdater()
-	go WeatherQueue()
+	go messageQueuer()
 
 	for {
 		time.Sleep(100 * time.Millisecond)
