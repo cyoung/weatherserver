@@ -2,6 +2,7 @@ package main
 
 import (
 	"../ADDS"
+	"../NEXRAD"
 	"encoding/json"
 	"fmt"
 	"github.com/kellydunn/golang-geo"
@@ -63,6 +64,19 @@ func weatherUpdater() {
 
 			}
 		}
+		// Get NEXRAD.
+		t, err := NEXRAD.GetCompressedTileFromLatLng(myConfig.StationLat, myConfig.StationLng)
+		if err != nil {
+			fmt.Printf("error obtaining NEXRAD: %s\n", err.Error())
+		} else {
+			m := DataMessage{
+				Message:  t,
+				UniqID:   "NEXRAD",
+				Priority: 12,
+				Expiry:   time.Now().Add(15 * time.Minute),
+			}
+			messageChan <- m
+		}
 		<-updateTicker.C
 	}
 }
@@ -110,8 +124,14 @@ func makeSendList() [][]byte {
 		if msgs, ok := sendListWithPriorities[priorities[i]]; ok {
 			for _, msg := range msgs {
 				if len(msg) > MAX_PACKET_SIZE {
-					fmt.Printf("WARNING! Message is larger than max packet size: '%s'\n", string(msg))
-					//continue //FIXME: Add provisions for fragmented packets.
+					//FIXME: Add provisions for fragmented packets.
+					//					fmt.Printf("WARNING! Message is larger than max packet size: '%s'\n", string(msg))
+					//					continue
+					for len(msg) > MAX_PACKET_SIZE {
+						ret = append(ret, msg[:MAX_PACKET_SIZE])
+						msg = msg[MAX_PACKET_SIZE+1:]
+					}
+					ret = append(ret, msg)
 				}
 				if len(ret) > 0 && (len(ret[len(ret)-1])+len(msg)+1) < MAX_PACKET_SIZE {
 					// Add this message to the last, with a '|' divider.
@@ -149,7 +169,8 @@ func messageQueuer() {
 				break // Nothing to send.
 			}
 			// Ready to send another packet. Send the next message in sendList.
-			fmt.Printf("-->%s\n", string(sendList[sendPosition])) //TODO: Send message to LoRa transmitter.
+			//			fmt.Printf("-->%s\n", string(sendList[sendPosition])) //TODO: Send message to LoRa transmitter.
+			fmt.Printf("-->%d\n", len(sendList[sendPosition]))
 			sendPosition++
 			if sendPosition+1 > len(sendList) {
 				sendPosition = 0
