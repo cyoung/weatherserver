@@ -6,57 +6,184 @@ import (
 	"fmt"
 	"github.com/kellydunn/golang-geo"
 	"os"
-	"strings"
-	"sync"
+	"sort"
 	"time"
 )
 
 type Config struct {
 	StationLat          float64
 	StationLng          float64
-	StationServiceRange float64 // Statute miles.
+	StationServiceRange uint // Statute miles.
 }
 
-var myConfig Config
+const (
+	MAX_PACKET_SIZE = 255  // Bytes.
+	MAX_PACKET_TIME = 1880 // ms. Calculated using the "LoRa Modem Calculator Tool", SF=12, BW=500kHz, CR=1, Payload=255, Preamble=4, CRC=Yes.
+)
 
-var metars map[string]ADDS.ADDSMETAR // station -> ADDSMETAR.
-var tafs map[string]ADDS.ADDSTAF     // station -> ADDSTAF.
-var weatherMutex *sync.Mutex
+var myConfig Config
 
 var selfGeo *geo.Point
 
 func weatherUpdater() {
-	updateTicker := time.NewTicker(10 * time.Minute)
+	updateTicker := time.NewTicker(5 * time.Minute)
 	for {
-		weatherMutex.Lock()
 		// Update the weather.
+
 		// Get METARs.
-		addsMetars, err := ADDS.GetLatestADDSMETARsInRadiusOf(SERVICE_RANGE, selfGeo)
+		addsMetars, err := ADDS.GetLatestADDSMETARsInRadiusOf(myConfig.StationServiceRange, selfGeo)
 		if err != nil {
 			fmt.Printf("error obtaining METARs: %s\n", err.Error())
 		} else {
 			for _, metar := range addsMetars {
-				metars[metar.StationID] = metar
+				// Generate a message, send it.
+				m := DataMessage{
+					Message:  []byte(metar.Text),
+					UniqID:   "METAR " + metar.StationID,
+					Priority: 10,
+					Expiry:   time.Now().Add(15 * time.Minute),
+				}
+				messageChan <- m
 			}
 		}
 		// Get TAFs.
-		addsTafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(SERVICE_RANGE, selfGeo)
+		addsTafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(myConfig.StationServiceRange, selfGeo)
 		if err != nil {
 			fmt.Printf("error obtaining TAFs: %s\n", err.Error())
 		} else {
 			for _, taf := range addsTafs {
-				tafs[taf.StationID] = taf
+				// Generate a message, send it.
+				m := DataMessage{
+					Message:  []byte(taf.Text),
+					UniqID:   "TAF " + taf.StationID,
+					Priority: 11,
+					Expiry:   time.Now().Add(15 * time.Minute),
+				}
+				messageChan <- m
+
 			}
 		}
-		weatherMutex.Unlock()
 		<-updateTicker.C
 	}
 }
 
+type DataMessage struct {
+	Message  []byte
+	UniqID   string    // Identifier for the message. If another message is received with this same identifier, the new message replaces it.
+	Priority int       // Priority is a non-unique. All messages of a single priority are grouped together, unordered.
+	Expiry   time.Time // The message expires after this timestamp. It will not be sent after the maintenance period has passed and the sendList has been sent completely at least once.
+}
+
+var messageQueue map[string]DataMessage // UniqID -> DataMessage mapping.
+
+func cleanupMessageQueue() {
+	// Look for expired messages.
+	t := time.Now()
+	msgs := make(map[string]DataMessage, 0)
+	for uniqID, msg := range messageQueue {
+		if msg.Expiry.After(t) { // Not expired yet. Add to new queue.
+			msgs[uniqID] = msg
+		}
+	}
+	messageQueue = msgs // Copy over temporary queue.
+}
+
+/*
+	makeSendList().
+	 Orders the messageQueue by Priority, then creates chunks of size MAX_PACKET_SIZE.
+*/
+
+func makeSendList() [][]byte {
+	ret := make([][]byte, 0)
+	priorities := make([]int, len(messageQueue))
+	var i int
+	sendListWithPriorities := make(map[int][][]byte, 0)
+	for _, msg := range messageQueue {
+		sendListWithPriorities[msg.Priority] = append(sendListWithPriorities[msg.Priority], msg.Message)
+		priorities[i] = msg.Priority
+		i++
+	}
+
+	// Start creating packets of size MAX_PACKET_SIZE.
+	sort.Ints(priorities)
+	for i = 0; i < len(messageQueue); i++ {
+		if msgs, ok := sendListWithPriorities[priorities[i]]; ok {
+			for _, msg := range msgs {
+				if len(msg) > MAX_PACKET_SIZE {
+					fmt.Printf("WARNING! Message is larger than max packet size: '%s'\n", string(msg))
+					continue
+				}
+				if len(ret) > 0 && (len(ret[len(ret)-1])+len(msg)+1) < MAX_PACKET_SIZE {
+					// Add this message to the last, with a '|' divider.
+					ret[len(ret)-1] = append(ret[len(ret)-1], byte('|'))
+					ret[len(ret)-1] = append(ret[len(ret)-1], msg...)
+				} else {
+					ret = append(ret, msg)
+				}
+			}
+			delete(sendListWithPriorities, priorities[i]) // Remove this map key - we've finished with messages with this priority number.
+		}
+	}
+	return ret
+}
+
+var messageChan chan DataMessage
+
+func WeatherQueue() {
+	messageQueue = make(map[string]DataMessage, 0)
+
+	var sendList [][]byte // Current message list.
+	var sendPosition int  // Position in the sending list.
+	var sendTimes int     // Number of times the current send list has been repeated.
+
+	packetSenderTicker := time.NewTicker(MAX_PACKET_TIME * time.Millisecond)
+	maintenanceTicker := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case m := <-messageChan:
+			// Receive a message to include in the next transmission.
+			messageQueue[m.UniqID] = m
+			fmt.Printf("Got message for '%s'!\n", m.UniqID)
+		case <-packetSenderTicker.C:
+			if len(sendList) == 0 {
+				break // Nothing to send.
+			}
+			// Ready to send another packet. Send the next message in sendList.
+			fmt.Printf("-->%s\n", string(sendList[sendPosition])) //TODO: Send message to LoRa transmitter.
+			sendPosition++
+			if sendPosition+1 > len(sendList) {
+				sendPosition = 0
+				sendTimes++
+			}
+		case <-maintenanceTicker.C:
+			// Do maintenance on the current queue. Clean up expired messages, create a new sendList, etc.
+			if len(sendList) > 0 && sendTimes == 0 {
+				// Don't do maintenance until the full list is sent at least once.
+				fmt.Printf("Warning: Maintenance was triggered before sendList was sent completely. len(sendList)=%d, sendPosition=%d.\n", len(sendList), sendPosition)
+				break
+			}
+			// Maintenance period has passed and the sendList has gone out at least once.
+			// First delete the stale entries.
+			cleanupMessageQueue()
+			// Regenerate the send list.
+			fmt.Printf("\n\n****Generating new send list****\n\n")
+			sendList = makeSendList()
+			// Print some statistics.
+			numBytes := 0
+			for _, m := range sendList {
+				numBytes += len(m)
+			}
+			fmt.Printf("\nTotal sendList time=%dms, total bytes=%d, total packets=%d, packet efficiency=%.1f%%.\n", MAX_PACKET_TIME*len(sendList), numBytes, len(sendList), 100.0*float64(numBytes)/(float64(len(sendList)*MAX_PACKET_SIZE)))
+			fmt.Printf("\n****Finished new send list****\n\n")
+			// Re-set the send counters.
+			sendPosition = 0
+			sendTimes = 0
+		}
+	}
+}
+
 func main() {
-	weatherMutex = &sync.Mutex{}
-	metars = make(map[string]ADDS.ADDSMETAR, 0)
-	tafs = make(map[string]ADDS.ADDSTAF, 0)
+	messageChan = make(chan DataMessage, 10240)
 
 	// Read and parse config file.
 	fp, err := os.Open("config.json")
@@ -74,31 +201,9 @@ func main() {
 	selfGeo = geo.NewPoint(myConfig.StationLat, myConfig.StationLng)
 
 	go weatherUpdater()
+	go WeatherQueue()
 
-	// Weather broadcast loop.
-	broadcastTicker := time.NewTicker(15 * time.Second)
 	for {
-		select {
-		case <-broadcastTicker.C:
-			weatherMutex.Lock()
-			fmt.Printf("**************************************************\n")
-			fmt.Printf("METAR: %d, TAF: %d, TOTAL: %d\n", len(metars), len(tafs), len(metars)+len(tafs))
-			for _, metar := range metars {
-				t := metar.Text
-				if !strings.HasPrefix(t, "METAR ") {
-					t = "METAR " + t
-				}
-				fmt.Printf("%s\n", t)
-			}
-			for _, taf := range tafs {
-				t := taf.Text
-				if !strings.HasPrefix(t, "METAR ") {
-					t = "TAF " + t
-				}
-				fmt.Printf("%s\n", t)
-			}
-			fmt.Printf("**************************************************\n")
-			weatherMutex.Unlock()
-		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
