@@ -2,18 +2,22 @@ package main
 
 import (
 	"../ADDS"
+	"encoding/json"
 	"fmt"
 	"github.com/kellydunn/golang-geo"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
-const (
-	SELF_LAT      = 43.336665
-	SELF_LNG      = -80.793457
-	SERVICE_RANGE = 150 // Statute miles.
-)
+type Config struct {
+	StationLat          float64
+	StationLng          float64
+	StationServiceRange float64 // Statute miles.
+}
+
+var myConfig Config
 
 var metars map[string]ADDS.ADDSMETAR // station -> ADDSMETAR.
 var tafs map[string]ADDS.ADDSTAF     // station -> ADDSTAF.
@@ -54,7 +58,20 @@ func main() {
 	metars = make(map[string]ADDS.ADDSMETAR, 0)
 	tafs = make(map[string]ADDS.ADDSTAF, 0)
 
-	selfGeo = geo.NewPoint(SELF_LAT, SELF_LNG)
+	// Read and parse config file.
+	fp, err := os.Open("config.json")
+	if err != nil {
+		fmt.Printf("Can't open 'config.json'.\n")
+		return
+	}
+	decoder := json.NewDecoder(fp)
+	err = decoder.Decode(&myConfig)
+	if err != nil {
+		fmt.Printf("Couldn't read 'config.json'.\n")
+		return
+	}
+
+	selfGeo = geo.NewPoint(myConfig.StationLat, myConfig.StationLng)
 
 	go weatherUpdater()
 
