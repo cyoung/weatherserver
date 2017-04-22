@@ -8,6 +8,7 @@ import (
 	"github.com/kellydunn/golang-geo"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -30,7 +31,7 @@ func weatherUpdater() {
 	updateTicker := time.NewTicker(5 * time.Minute)
 	for {
 		// Update the weather.
-
+		//TODO: Need to add type-specific formatting that the correct meta-data for the report (lat/lng for PIREP, actually form coherent radar frames, etc.)
 		// Get METARs.
 		addsMetars, err := ADDS.GetLatestADDSMETARsInRadiusOf(myConfig.StationServiceRange, selfGeo)
 		if err != nil {
@@ -61,7 +62,22 @@ func weatherUpdater() {
 					Expiry:   time.Now().Add(15 * time.Minute),
 				}
 				messageChan <- m
-
+			}
+		}
+		// Get PIREPs.
+		addsPireps, err := ADDS.GetLatestADDSPIREPsInRadiusOf(myConfig.StationServiceRange, selfGeo)
+		if err != nil {
+			fmt.Printf("error obtaining PIREPs: %s\n", err.Error())
+		} else {
+			for _, pirep := range addsPireps {
+				// Generate a message, send it.
+				m := DataMessage{
+					Message:  []byte(pirep.Text),
+					UniqID:   "PIREP " + strconv.FormatFloat(pirep.Latitude, 'f', 5, 64) + "," + strconv.FormatFloat(pirep.Longitude, 'f', 5, 64),
+					Priority: 9,
+					Expiry:   time.Now().Add(15 * time.Minute),
+				}
+				messageChan <- m
 			}
 		}
 		// Get NEXRAD.
