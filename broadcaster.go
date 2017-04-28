@@ -1,14 +1,15 @@
 package main
 
 import (
-	"../ADDS"
-	"../NEXRAD"
 	"encoding/json"
 	"fmt"
+	"github.com/cyoung/ADDS"
+	//	"github.com/cyoung/NEXRAD"
 	"github.com/kellydunn/golang-geo"
+	"github.com/stratux/goRFM95W/goRFM95W"
 	"os"
 	"sort"
-	"strconv"
+	//	"strconv"
 	"time"
 )
 
@@ -26,6 +27,8 @@ const (
 var myConfig Config
 
 var selfGeo *geo.Point
+
+var rfm95w *goRFM95W.RFM95W
 
 func weatherUpdater() {
 	updateTicker := time.NewTicker(5 * time.Minute)
@@ -48,51 +51,54 @@ func weatherUpdater() {
 				messageChan <- m
 			}
 		}
-		// Get TAFs.
-		addsTafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(myConfig.StationServiceRange, selfGeo)
-		if err != nil {
-			fmt.Printf("error obtaining TAFs: %s\n", err.Error())
-		} else {
-			for _, taf := range addsTafs {
-				// Generate a message, send it.
+		//FIXME: Only supporting METARs at the moment.
+		/*
+			// Get TAFs.
+			addsTafs, err := ADDS.GetLatestADDSTAFsInRadiusOf(myConfig.StationServiceRange, selfGeo)
+			if err != nil {
+				fmt.Printf("error obtaining TAFs: %s\n", err.Error())
+			} else {
+				for _, taf := range addsTafs {
+					// Generate a message, send it.
+					m := DataMessage{
+						Message:  []byte(taf.Text),
+						UniqID:   "TAF " + taf.StationID,
+						Priority: 11,
+						Expiry:   time.Now().Add(15 * time.Minute),
+					}
+					messageChan <- m
+				}
+			}
+			// Get PIREPs.
+			addsPireps, err := ADDS.GetLatestADDSPIREPsInRadiusOf(myConfig.StationServiceRange, selfGeo)
+			if err != nil {
+				fmt.Printf("error obtaining PIREPs: %s\n", err.Error())
+			} else {
+				for _, pirep := range addsPireps {
+					// Generate a message, send it.
+					m := DataMessage{
+						Message:  []byte(pirep.Text),
+						UniqID:   "PIREP " + strconv.FormatFloat(pirep.Latitude, 'f', 5, 64) + "," + strconv.FormatFloat(pirep.Longitude, 'f', 5, 64),
+						Priority: 9,
+						Expiry:   time.Now().Add(15 * time.Minute),
+					}
+					messageChan <- m
+				}
+			}
+			// Get NEXRAD.
+			t, err := NEXRAD.GetCompressedTileFromLatLng(myConfig.StationLat, myConfig.StationLng)
+			if err != nil {
+				fmt.Printf("error obtaining NEXRAD: %s\n", err.Error())
+			} else {
 				m := DataMessage{
-					Message:  []byte(taf.Text),
-					UniqID:   "TAF " + taf.StationID,
-					Priority: 11,
+					Message:  t,
+					UniqID:   "NEXRAD",
+					Priority: 12,
 					Expiry:   time.Now().Add(15 * time.Minute),
 				}
 				messageChan <- m
 			}
-		}
-		// Get PIREPs.
-		addsPireps, err := ADDS.GetLatestADDSPIREPsInRadiusOf(myConfig.StationServiceRange, selfGeo)
-		if err != nil {
-			fmt.Printf("error obtaining PIREPs: %s\n", err.Error())
-		} else {
-			for _, pirep := range addsPireps {
-				// Generate a message, send it.
-				m := DataMessage{
-					Message:  []byte(pirep.Text),
-					UniqID:   "PIREP " + strconv.FormatFloat(pirep.Latitude, 'f', 5, 64) + "," + strconv.FormatFloat(pirep.Longitude, 'f', 5, 64),
-					Priority: 9,
-					Expiry:   time.Now().Add(15 * time.Minute),
-				}
-				messageChan <- m
-			}
-		}
-		// Get NEXRAD.
-		t, err := NEXRAD.GetCompressedTileFromLatLng(myConfig.StationLat, myConfig.StationLng)
-		if err != nil {
-			fmt.Printf("error obtaining NEXRAD: %s\n", err.Error())
-		} else {
-			m := DataMessage{
-				Message:  t,
-				UniqID:   "NEXRAD",
-				Priority: 12,
-				Expiry:   time.Now().Add(15 * time.Minute),
-			}
-			messageChan <- m
-		}
+		*/
 		<-updateTicker.C
 	}
 }
@@ -187,6 +193,9 @@ func messageQueuer() {
 			// Ready to send another packet. Send the next message in sendList.
 			//			fmt.Printf("-->%s\n", string(sendList[sendPosition])) //TODO: Send message to LoRa transmitter.
 			fmt.Printf("-->%d\n", len(sendList[sendPosition]))
+
+			rfm95w.Send(sendList[sendPosition])
+
 			sendPosition++
 			if sendPosition+1 > len(sendList) {
 				sendPosition = 0
@@ -236,6 +245,20 @@ func main() {
 	}
 
 	selfGeo = geo.NewPoint(myConfig.StationLat, myConfig.StationLng)
+
+	// Initialize LoRa module.
+	rfm95w_h, err := goRFM95W.New()
+	if err != nil {
+		fmt.Printf("LoRa: error: %s\n", err.Error())
+		return
+	} else {
+		rfm95w = rfm95w_h
+		// Settings.
+		rfm95w.SetSpreadingFactor(11)
+		// Start capturing.
+		rfm95w.Start()
+		fmt.Printf("LoRa module ready.\n")
+	}
 
 	go weatherUpdater()
 	go messageQueuer()
