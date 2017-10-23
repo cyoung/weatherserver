@@ -246,15 +246,13 @@ func main() {
 
 	selfGeo = geo.NewPoint(myConfig.StationLat, myConfig.StationLng)
 
-	// Initialize LoRa module.
-	rfm95w_h, err := goRFM95W.New()
+	// Initialize LoRa module with default values.
+	rfm95w_h, err := goRFM95W.New(nil)
 	if err != nil {
 		fmt.Printf("LoRa: error: %s\n", err.Error())
 		return
 	} else {
 		rfm95w = rfm95w_h
-		// Settings.
-		rfm95w.SetSpreadingFactor(11)
 		// Start capturing.
 		rfm95w.Start()
 		fmt.Printf("LoRa module ready.\n")
